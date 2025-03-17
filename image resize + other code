@@ -1,0 +1,76 @@
+%% some code I ran on MATLAB to make a directory for the training images and resize them to 227x227 amd to RGB
+cd /Users/kiaraanderson/Downloads/archive
+mkdir('resized_train')
+dd = dir('*.jpg')
+for cntr = 1:length(dd)
+img = imread(dd(cntr).name)
+imgresized = imresized(img,[227,227]);
+imgresized_RGB = cat(3, imgresized, imgresized, imgresized);
+imwrite(imgresized_RGB, ['resized_train'\ dd(cntr).name]);
+end
+
+%Summer's code
+%% this is slightly altered as the tutorial instructed
+imds = imageDatastore('train', ...
+    'IncludeSubfolders',true, ...
+    'LabelSource','foldernames');
+
+
+%% this is all copy/pasted from the TL using AlexNet Example
+[imdsTrain,imdsValidation] = splitEachLabel(imds,0.7,'randomized');
+numTrainImages = numel(imdsTrain.Labels);
+idx = randperm(numTrainImages,16);
+figure
+for i = 1:16
+    subplot(4,4,i)
+    I = readimage(imdsTrain,idx(i));
+    imshow(I)
+end
+
+classNames = categories(imdsTrain.Labels);
+numClasses = numel(classNames)
+
+net = imagePretrainedNetwork("alexnet",NumClasses=numClasses);
+net = setLearnRateFactor(net,"fc8/Weights",20);
+net = setLearnRateFactor(net,"fc8/Bias",20);
+
+analyzeNetwork(net)
+
+pixelRange = [-30 30];
+imageAugmenter = imageDataAugmenter( ...
+    'RandXReflection',true, ...
+    'RandXTranslation',pixelRange, ...
+    'RandYTranslation',pixelRange);
+augimdsTrain = augmentedImageDatastore(inputSize(1:2),imdsTrain, ...
+    'DataAugmentation',imageAugmenter);
+
+augimdsValidation = augmentedImageDatastore(inputSize(1:2),imdsValidation);
+
+options = trainingOptions("sgdm", ...
+    MiniBatchSize=10, ...
+    MaxEpochs=6, ...
+    Metrics="accuracy", ...
+    InitialLearnRate=1e-4, ...
+    Shuffle="every-epoch", ...
+    ValidationData=augimdsValidation, ...
+    ValidationFrequency=3, ...
+    Verbose=false, ...
+    Plots="training-progress");
+
+net = trainnet(augimdsTrain,net,"crossentropy",options);
+
+scores = minibatchpredict(net,augimdsValidation);
+YPred = scores2label(scores,classNames);
+
+idx = randperm(numel(imdsValidation.Files),4);
+figure
+for i = 1:4
+    subplot(2,2,i)
+    I = readimage(imdsValidation,idx(i));
+    imshow(I)
+    label = YPred(idx(i));
+    title(string(label));
+end
+
+YValidation = imdsValidation.Labels;
+accuracy = mean(YPred == YValidation)
