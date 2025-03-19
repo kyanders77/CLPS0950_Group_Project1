@@ -1,0 +1,94 @@
+%% Finding and resizing the training images
+trainFolder = '/Users/mahnoorelahi/Desktop/archive/train'; 
+
+% Getting all subfolders inside trainFolder
+folders = dir(trainFolder);
+folders = folders([folders.isdir]); 
+folders = folders(~ismember({folders.name}, {'.', '..'})); 
+
+% Ensuring the resized folder exists
+resizedTrainFolder = fullfile(trainFolder, '../resized_train'); 
+mkdir(resizedTrainFolder);
+
+for i = 1:length(folders)
+    folderName = folders(i).name; % Get emotion folder name (angry, happy, etc.)
+    imageFiles = dir(fullfile(trainFolder, folderName, '*.jpg')); 
+
+    % Create matching subfolder inside 'resized_train'
+    saveFolder = fullfile(resizedTrainFolder, folderName);
+    mkdir(saveFolder);
+
+    for j = 1:length(imageFiles)
+        imgPath = fullfile(trainFolder, folderName, imageFiles(j).name);
+        img = imread(imgPath);
+        imgresized = imresize(img, [227, 227]); % Resize
+
+        % Convert grayscale images to RGB
+        if size(imgresized, 3) == 1  
+            imgresized = cat(3, imgresized, imgresized, imgresized);
+        end
+
+        % Save in the corresponding subfolder
+        savePath = fullfile(saveFolder, imageFiles(j).name);
+        imwrite(imgresized, savePath);
+        
+        % To confirm that each image is processed
+        disp(['✔ Saved: ', savePath]);
+    end
+end
+
+disp(" All Images Resized and Saved!");
+
+%% Load the Dataset from Current Folder
+imds = imageDatastore('resized_train', ...  
+    'IncludeSubfolders', true, ...
+    'LabelSource', 'foldernames');
+
+% Split the dataset into 70% training, 30% validation
+[imdsTrain, imdsValidation] = splitEachLabel(imds, 0.7, 'randomized');
+
+%% Modifying AlexNet for Emotion Classification
+net = alexnet;
+layers = net.Layers;
+numClasses = numel(categories(imdsTrain.Labels));
+
+% Modifying last layers to match number of emotion classes
+layers(end-2) = fullyConnectedLayer(numClasses, "Name", "fc8", ...
+    "WeightLearnRateFactor", 10, "BiasLearnRateFactor", 10);
+layers(end-1) = softmaxLayer("Name", "softmax");
+layers(end) = classificationLayer("Name", "output");
+
+%% Data Augmentation
+pixelRange = [-30 30];
+imageAugmenter = imageDataAugmenter( ...
+    'RandXReflection', true, ...
+    'RandXTranslation', pixelRange, ...
+    'RandYTranslation', pixelRange);
+
+augimdsTrain = augmentedImageDatastore([227, 227], imdsTrain, ...
+    'DataAugmentation', imageAugmenter);
+augimdsValidation = augmentedImageDatastore([227, 227], imdsValidation);
+
+%% Train Model
+options = trainingOptions("sgdm", ...
+    'MiniBatchSize', 10, ...
+    'MaxEpochs', 6, ...
+    'InitialLearnRate', 1e-4, ...
+    'Shuffle', "every-epoch", ...
+    'ValidationData', augimdsValidation, ...
+    'ValidationFrequency', 3, ...
+    'Verbose', false, ...
+    'Plots', "training-progress");
+
+net = trainNetwork(augimdsTrain, layers, options);
+disp("Training Complete!");
+
+%% Evaluate Model
+YPred = classify(net, augimdsValidation);
+accuracy = mean(YPred == imdsValidation.Labels);
+disp(['Model Accuracy: ', num2str(accuracy * 100), '%']);
+
+% Save the trained model
+save('emotionNet.mat', 'net');
+disp("Model saved as emotionNet.mat");
+
