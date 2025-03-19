@@ -1,0 +1,46 @@
+%% Load resized Dataset
+resizedTrainFolder = '/Users/mahnoorelahi/Desktop/archive/resized_train'; 
+
+imds = imageDatastore(resizedTrainFolder, ...
+    'IncludeSubfolders', true, ...
+    'LabelSource', 'foldernames');
+
+[imdsTrain, ~] = splitEachLabel(imds, 0.1, 'randomized'); 
+[imdsValidation, ~] = splitEachLabel(imds, 0.1, 'randomized'); 
+
+%% Modify AlexNet for Emotion Classification
+net = alexnet;
+layers = net.Layers;
+numClasses = numel(categories(imdsTrain.Labels));
+
+layers(end-2) = fullyConnectedLayer(numClasses, "Name", "fc8", ...
+    "WeightLearnRateFactor", 10, "BiasLearnRateFactor", 10);
+layers(end-1) = softmaxLayer("Name", "softmax");
+layers(end) = classificationLayer("Name", "output");
+
+%% Data Augmentation
+imageAugmenter = imageDataAugmenter('RandXReflection', true);
+augimdsTrain = augmentedImageDatastore([227, 227], imdsTrain, 'DataAugmentation', imageAugmenter);
+augimdsValidation = augmentedImageDatastore([227, 227], imdsValidation);
+
+%% Train Model- adjustments for greater Speed
+options = trainingOptions("sgdm", ...
+    'MiniBatchSize', 16, ... %larger batch size for efficiency
+    'MaxEpochs', 1, ... %Fewer epochs for faster training
+    'InitialLearnRate', 1e-3, ... %Higher LR for faster convergence
+    'Shuffle', "every-epoch", ...
+    'ExecutionEnvironment', "auto", ... %GPU if available
+    'ValidationData', augimdsValidation, ...
+    'ValidationFrequency', 3, ...
+    'Verbose', true, ...
+    'Plots', "training-progress");
+
+net = trainNetwork(augimdsTrain, layers, options);
+
+%% Save Model
+save('emotionNet_fast.mat', 'net');
+
+%% Evaluate Model
+YPred = classify(net, augimdsValidation);
+accuracy = mean(YPred == imdsValidation.Labels);
+disp(['Model Accuracy: ', num2str(accuracy * 100), '%']);
