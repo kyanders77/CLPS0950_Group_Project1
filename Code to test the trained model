@@ -1,0 +1,19 @@
+load('emotionNet.mat', 'net'); % The trained model
+disp(" Model loaded successfully!");
+
+% Preprocess the new image
+newImage = imread('/Users/mahnoorelahi/Desktop/images.jpeg'); % Replace with actual image path
+newImage = imresize(newImage, [227, 227]); % Resizing
+
+% Convert grayscale to RGB (if needed)
+if size(newImage, 3) == 1
+newImage = cat(3, newImage, newImage, newImage);
+end
+
+% Classify the image
+predictedLabel = classify(net, newImage);
+
+% Show the result
+imshow(newImage);
+title(['Predicted Emotion: ', char(predictedLabel)]);
+disp(['Predicted Emotion: ', char(predictedLabel)]);
